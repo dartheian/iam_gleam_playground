@@ -1,12 +1,7 @@
-import gleam/dynamic.{type Dynamic}
 import gleam/http
-import iam_gleam_playground/data.{type Data}
+import iam_gleam_playground/middleware
 import iam_gleam_playground/web.{type Context}
-import radish
-import radish/error as radish_error
 import wisp.{type Request, type Response}
-
-const timeout = 128
 
 pub fn handle_request(request: Request, context: Context) -> Response {
   use request <- web.middleware(request)
@@ -32,26 +27,15 @@ fn redis(request: Request, context: Context, key) -> Response {
 
 fn get(request: Request, context: Context, key: String) -> Response {
   use <- wisp.require_method(request, http.Get)
-  case radish.get(context.redis_client, key, timeout) {
-    Ok(data) -> wisp.ok() |> wisp.string_body(data)
-    Error(radish_error.NotFound) -> wisp.not_found()
-    Error(_) -> wisp.internal_server_error()
-  }
+  use data <- middleware.get_session(context, key)
+  wisp.ok()
+  |> wisp.string_body(data)
 }
 
 fn put(request: Request, context: Context, key: String) -> Response {
   use <- wisp.require_method(request, http.Put)
   use json <- wisp.require_json(request)
-  use data <- decode_data(json)
-  case radish.set(context.redis_client, key, data.content, timeout) {
-    Ok(_) -> wisp.ok()
-    Error(_) -> wisp.internal_server_error()
-  }
-}
-
-fn decode_data(json: Dynamic, next: fn(Data) -> Response) -> Response {
-  case data.decode(json) {
-    Ok(data) -> next(data)
-    Error(_) -> wisp.unprocessable_entity()
-  }
+  use data <- middleware.decode_data(json)
+  use <- middleware.set_session(context, key, data.content)
+  wisp.ok()
 }
